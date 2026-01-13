@@ -55,10 +55,10 @@ IMPORTANT RULES:
 
 When analyzing projects, consider: project type, progress, team size, timeline, and user's specific goals.`;
 
-// Get Gemini model
+// Get Gemini model - UPDATED TO gemini-1.5-flash
 const getModel = () => {
   return genAI.getGenerativeModel({ 
-    model: "gemini-pro",
+    model: "gemini-1.5-flash", 
     generationConfig: {
       temperature: 0.9,
       topK: 40,
@@ -102,7 +102,7 @@ app.get('/api/test', async (req, res) => {
 app.post('/api/project-hints', async (req, res) => {
   try {
     const { project } = req.body;
-    
+
     if (!project || !project.name) {
       return res.status(400).json({ 
         success: false, 
@@ -133,7 +133,7 @@ Be specific to THIS project. Use markdown formatting. Be encouraging but practic
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const text = response.text();
-    
+
     console.log('✅ Generated hints');
     res.json({ 
       success: true, 
@@ -153,7 +153,7 @@ Be specific to THIS project. Use markdown formatting. Be encouraging but practic
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, project, conversationHistory } = req.body;
-    
+
     if (!message) {
       return res.status(400).json({ 
         success: false, 
@@ -161,14 +161,13 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
-    // Build context
     let contextMessages = '';
     if (conversationHistory && conversationHistory.length > 0) {
       contextMessages = conversationHistory.slice(-5).map(msg => 
         `${msg.role === 'user' ? 'User' : 'Nexus AI'}: ${msg.content}`
       ).join('\n');
     }
-    
+
     let projectContext = '';
     if (project) {
       projectContext = `\n\nCURRENT PROJECT CONTEXT:
@@ -178,7 +177,7 @@ app.post('/api/chat', async (req, res) => {
 - Team: ${project.team} members
 - Deadline: ${project.due}`;
     }
-    
+
     const prompt = `${NEXUS_SYSTEM_PROMPT}
 
 CONVERSATION HISTORY:
@@ -194,7 +193,7 @@ RESPOND AS NEXUS AI: Be helpful, specific, and actionable. If discussing the pro
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const text = response.text();
-    
+
     console.log('✅ Chat response generated');
     res.json({ 
       success: true, 
@@ -214,7 +213,7 @@ RESPOND AS NEXUS AI: Be helpful, specific, and actionable. If discussing the pro
 app.post('/api/roadmap', async (req, res) => {
   try {
     const { project } = req.body;
-    
+
     if (!project || !project.name) {
       return res.status(400).json({ 
         success: false, 
@@ -241,7 +240,7 @@ Format using markdown. Be specific to this project type.`;
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const text = response.text();
-    
+
     console.log('✅ Roadmap generated');
     res.json({ 
       success: true, 
@@ -269,6 +268,7 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`✅ Nexus AI Backend running on port ${PORT}`);
-  console.log(`🤖 Gemini API configured: ${!!API_KEY}`);
-  console.log(`🌍 Allowed origins:`, allowedOrigins);
 });
+
+// EXPORT FOR VERCEL
+module.exports = app;
