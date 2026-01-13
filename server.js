@@ -1,21 +1,16 @@
 require('dotenv').config(); 
 const express = require('express');
 const cors = require('cors');
-// Updated to the newer GenAI SDK for better compatibility
-const { GoogleGenAI } = require('@google/genai'); 
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
 
 // Initialize Gemini AI
 const API_KEY = process.env.GEMINI_API_KEY;
 if (!API_KEY) {
   console.error('❌ GEMINI_API_KEY not found in environment variables!');
-  process.exit(1);
 }
-
-// Using the new SDK structure
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+const genAI = new GoogleGenerativeAI(API_KEY || "");
 
 // Middleware
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
@@ -33,7 +28,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// System prompt (Kept exactly as you had it)
+// --- SYSTEM PROMPT ---
 const NEXUS_SYSTEM_PROMPT = `You are Nexus AI, an intelligent project management assistant built to help users plan and execute their projects successfully.
 
 PERSONALITY:
@@ -56,102 +51,100 @@ IMPORTANT RULES:
 - Use markdown formatting (##, **, bullet points)
 - Be encouraging but honest about challenges.`;
 
-// 🤖 UPDATED: Using Gemini 2.5 Flash
+// 🤖 Robust Model Helper (Updated to Gemini 3 Flash)
 const getModelResponse = async (prompt) => {
-  return await ai.models.generateContent({
-    model: 'gemini-2.5-flash', 
-    contents: prompt,
-    config: {
+  // Using 'gemini-3-flash' - the latest fast model for Jan 2026
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-3-flash",
+    generationConfig: {
       temperature: 0.9,
       topK: 40,
       topP: 0.95,
       maxOutputTokens: 2048,
     },
   });
+  
+  const result = await model.generateContent(prompt);
+  const response = await result.response;
+  return response.text();
 };
 
-// Routes
+// --- ROUTES ---
 
-// Health check
+// 1. Health check
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    message: 'Nexus AI Backend is running',
-    geminiConfigured: !!API_KEY 
-  });
+  res.json({ status: 'ok', geminiConfigured: !!API_KEY });
 });
 
-// Test Gemini connection
+// 2. Test Gemini connection
 app.get('/api/test', async (req, res) => {
   try {
-    const result = await getModelResponse('Say "Nexus AI is online!" in a friendly way.');
-    res.json({ 
-      success: true, 
-      message: result.text
-    });
+    const text = await getModelResponse('Say "Nexus AI is online!" in a friendly way.');
+    res.json({ success: true, message: text });
   } catch (error) {
     console.error('Test error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
-  }
-});
-
-// Generate project hints
-app.post('/api/project-hints', async (req, res) => {
-  try {
-    const { project } = req.body;
-    if (!project || !project.name) {
-      return res.status(400).json({ success: false, error: 'Project data is required' });
-    }
-
-    const prompt = `${NEXUS_SYSTEM_PROMPT}\n\nUSER'S PROJECT:\n- Name: ${project.name}\n- Description: ${project.description || 'No description provided'}\n- Progress: ${project.progress}%\n- Team Size: ${project.team} members\n- Deadline: ${project.due}\n- Status: ${project.status}\n\nTASK: As Nexus AI, provide insights, tech stack, next steps, and challenges.`;
-
-    const result = await getModelResponse(prompt);
-    res.json({ success: true, hints: result.text });
-  } catch (error) {
-    console.error('❌ Project hints error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Chat with AI
+// 3. Generate project hints
+app.post('/api/project-hints', async (req, res) => {
+  try {
+    const { project } = req.body;
+    if (!project?.name) return res.status(400).json({ success: false, error: 'Project data is required' });
+
+    const prompt = `${NEXUS_SYSTEM_PROMPT}
+USER'S PROJECT:
+- Name: ${project.name}
+- Description: ${project.description || 'No description'}
+- Progress: ${project.progress}%
+- Team: ${project.team} members
+
+TASK: Provide Smart Insights, Recommended Tech Stack, Next Steps, and Challenges.`;
+
+    const text = await getModelResponse(prompt);
+    res.json({ success: true, hints: text });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 4. Chat with AI
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, project, conversationHistory } = req.body;
     if (!message) return res.status(400).json({ success: false, error: 'Message is required' });
 
     let context = conversationHistory?.slice(-5).map(msg => `${msg.role}: ${msg.content}`).join('\n') || '';
-    let projectContext = project ? `\nPROJECT: ${project.name} (${project.progress}% done)` : '';
+    let projectContext = project ? `\nCONTEXT: Project ${project.name} is ${project.progress}% done.` : '';
 
-    const fullPrompt = `${NEXUS_SYSTEM_PROMPT}\n${context}${projectContext}\nUSER: ${message}`;
-    const result = await getModelResponse(fullPrompt);
-
-    res.json({ success: true, response: result.text });
+    const fullPrompt = `${NEXUS_SYSTEM_PROMPT}\n${context}${projectContext}\nUSER: ${message}\nNEXUS AI:`;
+    
+    const text = await getModelResponse(fullPrompt);
+    res.json({ success: true, response: text });
   } catch (error) {
-    console.error('❌ Chat error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Generate roadmap
+// 5. Generate roadmap
 app.post('/api/roadmap', async (req, res) => {
   try {
     const { project } = req.body;
-    if (!project || !project.name) return res.status(400).json({ success: false, error: 'Project data is required' });
+    if (!project?.name) return res.status(400).json({ success: false, error: 'Project data is required' });
 
-    const prompt = `${NEXUS_SYSTEM_PROMPT}\n\nCreate a 5-phase roadmap for: ${project.name}. Description: ${project.description}`;
-    const result = await getModelResponse(prompt);
-
-    res.json({ success: true, roadmap: result.text });
+    const prompt = `${NEXUS_SYSTEM_PROMPT}\nCreate a 5-phase roadmap for: ${project.name}. Description: ${project.description}`;
+    const text = await getModelResponse(prompt);
+    res.json({ success: true, roadmap: text });
   } catch (error) {
-    console.error('❌ Roadmap error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`✅ Nexus AI Backend running on port ${PORT}`);
-});
+// IMPORTANT: Vercel needs the app exported, not just a port listener
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => console.log(`🚀 Nexus Backend running on http://localhost:${PORT}`));
+}
+
+module.exports = app;
