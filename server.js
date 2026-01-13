@@ -28,7 +28,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// --- SYSTEM PROMPT ---
+// --- FULL SYSTEM PROMPT ---
 const NEXUS_SYSTEM_PROMPT = `You are Nexus AI, an intelligent project management assistant built to help users plan and execute their projects successfully.
 
 PERSONALITY:
@@ -51,19 +51,17 @@ IMPORTANT RULES:
 - Use markdown formatting (##, **, bullet points)
 - Be encouraging but honest about challenges.`;
 
-// 🤖 Robust Model Helper (Updated to Gemini 3 Flash)
+// 🤖 Production Stable Model Helper
 const getModelResponse = async (prompt) => {
-  // Using 'gemini-3-flash' - the latest fast model for Jan 2026
+  // Using gemini-2.5-flash: The stable production standard for 2026
   const model = genAI.getGenerativeModel({ 
-    model: "gemini-3-flash",
+    model: "gemini-2.5-flash",
     generationConfig: {
-      temperature: 0.9,
-      topK: 40,
-      topP: 0.95,
+      temperature: 0.8,
       maxOutputTokens: 2048,
     },
   });
-  
+
   const result = await model.generateContent(prompt);
   const response = await result.response;
   return response.text();
@@ -119,7 +117,7 @@ app.post('/api/chat', async (req, res) => {
     let projectContext = project ? `\nCONTEXT: Project ${project.name} is ${project.progress}% done.` : '';
 
     const fullPrompt = `${NEXUS_SYSTEM_PROMPT}\n${context}${projectContext}\nUSER: ${message}\nNEXUS AI:`;
-    
+
     const text = await getModelResponse(fullPrompt);
     res.json({ success: true, response: text });
   } catch (error) {
@@ -141,7 +139,7 @@ app.post('/api/roadmap', async (req, res) => {
   }
 });
 
-// IMPORTANT: Vercel needs the app exported, not just a port listener
+// Export for Vercel
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 3001;
   app.listen(PORT, () => console.log(`🚀 Nexus Backend running on http://localhost:${PORT}`));
