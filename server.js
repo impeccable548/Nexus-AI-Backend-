@@ -1,7 +1,8 @@
-require('dotenv').config(); // Fixed: lowercase 'require'
+require('dotenv').config(); 
 const express = require('express');
 const cors = require('cors');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+// Updated to the newer GenAI SDK for better compatibility
+const { GoogleGenAI } = require('@google/genai'); 
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -12,7 +13,9 @@ if (!API_KEY) {
   console.error('❌ GEMINI_API_KEY not found in environment variables!');
   process.exit(1);
 }
-const genAI = new GoogleGenerativeAI(API_KEY);
+
+// Using the new SDK structure
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 // Middleware
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
@@ -30,7 +33,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// System prompt
+// System prompt (Kept exactly as you had it)
 const NEXUS_SYSTEM_PROMPT = `You are Nexus AI, an intelligent project management assistant built to help users plan and execute their projects successfully.
 
 PERSONALITY:
@@ -51,15 +54,14 @@ IMPORTANT RULES:
 - Give SPECIFIC advice with examples, not generic tips
 - Keep responses under 300 words unless asked for more detail
 - Use markdown formatting (##, **, bullet points)
-- Be encouraging but honest about challenges
+- Be encouraging but honest about challenges.`;
 
-When analyzing projects, consider: project type, progress, team size, timeline, and user's specific goals.`;
-
-// Get Gemini model
-const getModel = () => {
-  return genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash",  // Fixed: Removed "-latest" to match API v1 requirements
-    generationConfig: {
+// 🤖 UPDATED: Using Gemini 2.5 Flash
+const getModelResponse = async (prompt) => {
+  return await ai.models.generateContent({
+    model: 'gemini-2.5-flash', 
+    contents: prompt,
+    config: {
       temperature: 0.9,
       topK: 40,
       topP: 0.95,
@@ -82,12 +84,10 @@ app.get('/api/health', (req, res) => {
 // Test Gemini connection
 app.get('/api/test', async (req, res) => {
   try {
-    const model = getModel();
-    const result = await model.generateContent('Say "Nexus AI is online!" in a friendly way.');
-    const response = await result.response;
+    const result = await getModelResponse('Say "Nexus AI is online!" in a friendly way.');
     res.json({ 
       success: true, 
-      message: response.text() 
+      message: result.text
     });
   } catch (error) {
     console.error('Test error:', error);
@@ -102,50 +102,17 @@ app.get('/api/test', async (req, res) => {
 app.post('/api/project-hints', async (req, res) => {
   try {
     const { project } = req.body;
-
     if (!project || !project.name) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Project data is required' 
-      });
+      return res.status(400).json({ success: false, error: 'Project data is required' });
     }
 
-    const prompt = `${NEXUS_SYSTEM_PROMPT}
+    const prompt = `${NEXUS_SYSTEM_PROMPT}\n\nUSER'S PROJECT:\n- Name: ${project.name}\n- Description: ${project.description || 'No description provided'}\n- Progress: ${project.progress}%\n- Team Size: ${project.team} members\n- Deadline: ${project.due}\n- Status: ${project.status}\n\nTASK: As Nexus AI, provide insights, tech stack, next steps, and challenges.`;
 
-USER'S PROJECT:
-- Name: ${project.name}
-- Description: ${project.description || 'No description provided'}
-- Progress: ${project.progress}%
-- Team Size: ${project.team} members
-- Deadline: ${project.due}
-- Status: ${project.status}
-
-TASK: As Nexus AI, analyze this project and provide:
-1. **Smart Insights** - 5-7 specific, actionable hints for THIS project (not generic advice)
-2. **Recommended Tech Stack** - Suggest specific tools/frameworks if relevant
-3. **Next Steps** - Based on ${project.progress}% progress, what should they do NOW?
-4. **Potential Challenges** - What to watch out for
-
-Be specific to THIS project. Use markdown formatting. Be encouraging but practical.`;
-
-    console.log('🤖 Generating project hints for:', project.name);
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
-
-    console.log('✅ Generated hints');
-    res.json({ 
-      success: true, 
-      hints: text 
-    });
-
+    const result = await getModelResponse(prompt);
+    res.json({ success: true, hints: result.text });
   } catch (error) {
     console.error('❌ Project hints error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -153,60 +120,18 @@ Be specific to THIS project. Use markdown formatting. Be encouraging but practic
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, project, conversationHistory } = req.body;
+    if (!message) return res.status(400).json({ success: false, error: 'Message is required' });
 
-    if (!message) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Message is required' 
-      });
-    }
+    let context = conversationHistory?.slice(-5).map(msg => `${msg.role}: ${msg.content}`).join('\n') || '';
+    let projectContext = project ? `\nPROJECT: ${project.name} (${project.progress}% done)` : '';
 
-    // Build context
-    let contextMessages = '';
-    if (conversationHistory && conversationHistory.length > 0) {
-      contextMessages = conversationHistory.slice(-5).map(msg => 
-        `${msg.role === 'user' ? 'User' : 'Nexus AI'}: ${msg.content}`
-      ).join('\n');
-    }
+    const fullPrompt = `${NEXUS_SYSTEM_PROMPT}\n${context}${projectContext}\nUSER: ${message}`;
+    const result = await getModelResponse(fullPrompt);
 
-    let projectContext = '';
-    if (project) {
-      projectContext = `\n\nCURRENT PROJECT CONTEXT:
-- Name: ${project.name}
-- Description: ${project.description || 'Not specified'}
-- Progress: ${project.progress}%
-- Team: ${project.team} members
-- Deadline: ${project.due}`;
-    }
-
-    const prompt = `${NEXUS_SYSTEM_PROMPT}
-
-CONVERSATION HISTORY:
-${contextMessages}
-${projectContext}
-
-USER MESSAGE: ${message}
-
-RESPOND AS NEXUS AI: Be helpful, specific, and actionable. If discussing the project, reference the context above. Keep it conversational and under 200 words unless more detail is requested. Use markdown formatting.`;
-
-    console.log('🤖 Processing chat message');
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
-
-    console.log('✅ Chat response generated');
-    res.json({ 
-      success: true, 
-      response: text 
-    });
-
+    res.json({ success: true, response: result.text });
   } catch (error) {
     console.error('❌ Chat error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -214,61 +139,19 @@ RESPOND AS NEXUS AI: Be helpful, specific, and actionable. If discussing the pro
 app.post('/api/roadmap', async (req, res) => {
   try {
     const { project } = req.body;
+    if (!project || !project.name) return res.status(400).json({ success: false, error: 'Project data is required' });
 
-    if (!project || !project.name) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Project data is required' 
-      });
-    }
+    const prompt = `${NEXUS_SYSTEM_PROMPT}\n\nCreate a 5-phase roadmap for: ${project.name}. Description: ${project.description}`;
+    const result = await getModelResponse(prompt);
 
-    const prompt = `${NEXUS_SYSTEM_PROMPT}
-
-PROJECT: ${project.name}
-DESCRIPTION: ${project.description || 'Not specified'}
-CURRENT PROGRESS: ${project.progress}%
-
-TASK: As Nexus AI, create a detailed project roadmap with 5 phases. For each phase include:
-- Phase name
-- Key tasks (3-5 specific tasks)
-- Estimated duration
-- Success criteria
-
-Format using markdown. Be specific to this project type.`;
-
-    console.log('🤖 Generating roadmap for:', project.name);
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
-
-    console.log('✅ Roadmap generated');
-    res.json({ 
-      success: true, 
-      roadmap: text 
-    });
-
+    res.json({ success: true, roadmap: result.text });
   } catch (error) {
     console.error('❌ Roadmap error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
-});
-
-// Error handling
-app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  res.status(500).json({ 
-    success: false, 
-    error: 'Internal server error' 
-  });
 });
 
 // Start server
 app.listen(PORT, () => {
   console.log(`✅ Nexus AI Backend running on port ${PORT}`);
-  console.log(`🤖 Gemini API configured: ${!!API_KEY}`);
-  console.log(`🌍 Allowed origins:`, allowedOrigins);
 });
