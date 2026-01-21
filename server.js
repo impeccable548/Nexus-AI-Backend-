@@ -28,12 +28,6 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// --- IMPORT AUTH MIDDLEWARE & ROUTES ---
-const { verifyAuth, optionalAuth } = require('./middleware/auth');
-const { requireAdmin } = require('./middleware/admin');
-const authRoutes = require('./routes/auth');
-const projectsRoutes = require('./routes/projects');
-
 // --- FULL SYSTEM PROMPT ---
 const NEXUS_SYSTEM_PROMPT = `You are Nexus AI, an intelligent project management assistant built to help users plan and execute their projects successfully.
 
@@ -72,11 +66,7 @@ const getModelResponse = async (prompt) => {
   return response.text();
 };
 
-// --- MOUNT AUTH & PROJECT ROUTES ---
-app.use('/api/auth', authRoutes);
-app.use('/api/projects', projectsRoutes);
-
-// --- EXISTING AI ROUTES (Keep as is) ---
+// --- ROUTES ---
 
 // 1. Health check
 app.get('/api/health', (req, res) => {
@@ -98,8 +88,8 @@ app.get('/api/test', async (req, res) => {
   }
 });
 
-// 3. Generate project hints (NOW PROTECTED - requires auth)
-app.post('/api/project-hints', verifyAuth, async (req, res) => {
+// 3. Generate project hints
+app.post('/api/project-hints', async (req, res) => {
   try {
     const { project } = req.body;
     if (!project?.name) return res.status(400).json({ success: false, error: 'Project data is required' });
@@ -120,8 +110,8 @@ TASK: Provide Smart Insights, Recommended Tech Stack, Next Steps, and Challenges
   }
 });
 
-// 4. Chat with AI (NOW PROTECTED - requires auth)
-app.post('/api/chat', verifyAuth, async (req, res) => {
+// 4. Chat with AI
+app.post('/api/chat', async (req, res) => {
   try {
     const { message, project, conversationHistory } = req.body;
     if (!message) return res.status(400).json({ success: false, error: 'Message is required' });
@@ -138,8 +128,8 @@ app.post('/api/chat', verifyAuth, async (req, res) => {
   }
 });
 
-// 5. Generate roadmap (NOW PROTECTED - requires auth)
-app.post('/api/roadmap', verifyAuth, async (req, res) => {
+// 5. Generate roadmap
+app.post('/api/roadmap', async (req, res) => {
   try {
     const { project } = req.body;
     if (!project?.name) return res.status(400).json({ success: false, error: 'Project data is required' });
